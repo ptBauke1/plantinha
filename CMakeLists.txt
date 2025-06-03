@@ -33,27 +33,32 @@ project(proj_pico C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# Add executable. Default name is the project name, version 0.1
-
-add_executable(proj_pico proj_pico.c )
-
-pico_set_program_name(proj_pico "proj_pico")
-pico_set_program_version(proj_pico "0.1")
-
-# Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(proj_pico 1)
-pico_enable_stdio_usb(proj_pico 1)
-
-# Add the standard library to the build
-target_link_libraries(proj_pico
-        pico_stdlib
-        hardware_adc
-        hardware_gpio)
-
-# Add the standard include files to the build
-target_include_directories(proj_pico PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
+# Adiciona o executável (main.cpp na raiz do projeto)
+add_executable(${PROJECT_NAME}
+    main.cpp
+    src/ssd1306/SSD1306_OLED.cpp
+    src/ssd1306/SSD1306_OLED_graphics.cpp
+    src/ssd1306/SSD1306_OLED_font.cpp
+    src/ssd1306/SSD1306_OLED_Print.cpp
 )
 
-pico_add_extra_outputs(proj_pico)
+# Adiciona o diretório 'include' ao caminho de busca dos headers
+target_include_directories(${PROJECT_NAME} PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/include
+    # Adicione outros diretórios de include aqui, se houver
+)
 
+# Link com as bibliotecas do Pico SDK
+target_link_libraries(${PROJECT_NAME}
+    pico_stdlib
+    hardware_i2c
+    hardware_adc
+    # A biblioteca matemática (m) geralmente é vinculada automaticamente com o C++ no Pico SDK.
+)
+
+# Outras configurações do Pico SDK (gerar .uf2, etc.)
+pico_add_extra_outputs(${PROJECT_NAME})
+
+# Habilitar saida USB e/ou UART para o printf
+pico_enable_stdio_usb(${PROJECT_NAME} 1)
+pico_enable_stdio_uart(${PROJECT_NAME} 1)
