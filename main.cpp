@@ -12,44 +12,20 @@
 #define PIN_RELE 2
 #define PIN_SENSOR 26
 
-#define ADC_MAXREADING 1800
-#define ADC_MINREADING 1000
+#define ADC_MAXREADING 3500 // -> Solo seco (valor máximo do ADC)
+#define ADC_MINREADING 900 // -> sensor imerso em água (valor mínimo do ADC)
 
-#define HUMIDITY_THRESHOLD 0.7f // Limite de umidade para ativar o relé (50%)
+#define HUMIDITY_THRESHOLD 0.4f // Limite de umidade para ativar o relé (40%)
+#define PUMP_INTERVAL_US 1500000 // Intervalo de tempo para o relé (1,5 segundo)
+#define RELE_INTERVAL_US 120000000 // Intervalo de tempo para o relé 
 
 struct repeating_timer timer;
 
 uint16_t adc_raw_value = 0; // Variável para armazenar o valor lido do ADC
 float humidity_percentage = 0.0f; // Variável para armazenar a umidade em porcentagem
-
-
-bool repeating_timer_callback(struct repeating_timer *t) {
-    adc_raw_value = adc_read(); // Lê o valor do ADC
-    return true;
-}
-
-void convert_adc(){
-    // Converte o valor lido do ADC para porcentagem de umidade (0 a 1.0 - inversalmente proporcional)
-    if (adc_raw_value >= ADC_MAXREADING) {
-        humidity_percentage = 0.0f; // Se o valor for máximo, a umidade é 0%
-    } else if (adc_raw_value <= ADC_MINREADING) {
-        humidity_percentage = 1.0f; // Se o valor for mínimo, a umidade é 100%
-    } else {
-        // Interpolação linear para converter o valor do ADC em porcentagem de umidade
-        humidity_percentage = 1.0f - ((float)(adc_raw_value - ADC_MINREADING) / (ADC_MAXREADING - ADC_MINREADING));
-    }
-}
-
-void control_relay() {
-    // Controla o relé com base na umidade, ligando o relé por um tempo fixo e desligando-o
-    if (humidity_percentage < HUMIDITY_THRESHOLD) { // Se a umidade for menor que 50%
-        gpio_put(PIN_RELE, true); // Liga o relé
-        sleep_ms(1500); // Mantém o relé ligado por 1 segundo
-        gpio_put(PIN_RELE, false); // Desliga o relé
-    }
-}
-
-
+uint32_t pump_timer = 0; // Timer para controlar o relé
+uint32_t rele_time = 0; // Tempo do último acionamento do relé
+bool flag_rele = false; // Flag para controlar o estado do relé
 // --- Configurações Globais para o OLED e Wrappers ---
 const int16_t OLED_WIDTH = 128;
 const int16_t OLED_HEIGHT = 32; // Mude para 32 se for um display 128x32
@@ -62,11 +38,53 @@ SSD1306 oled(OLED_WIDTH, OLED_HEIGHT);
 bool oled_is_initialized = false;
 
 // Configurações I2C Padrão (podem ser sobrescritas na função oled_init)
-#define DEFAULT_I2C_INSTANCE i2c0
-#define DEFAULT_I2C_SDA_PIN 16
-#define DEFAULT_I2C_SCL_PIN 17
+#define I2C_INSTANCE i2c0
+#define I2C_SDA_PIN 16
+#define I2C_SCL_PIN 17
 #define DEFAULT_I2C_CLOCK_SPEED 100 // kHz
 #define DEFAULT_OLED_I2C_ADDRESS SSD1306_ADDR // 0x3C
+
+
+bool repeating_timer_callback(struct repeating_timer *t) {
+    adc_raw_value = adc_read(); // Lê o valor do ADC
+    return true;
+}
+
+void convert_adc(){
+    // Converte o valor lido do ADC para porcentagem de umidade (0 a 100%)
+    if (adc_raw_value >= ADC_MAXREADING) {
+        humidity_percentage = 0.0f; // Se o valor for máximo, a umidade é 0%
+    } else if (adc_raw_value <= ADC_MINREADING) {
+        humidity_percentage = 100.0f; // Se o valor for mínimo, a umidade é 100%
+    } else {
+        // Interpolação linear para converter o valor do ADC em porcentagem de umidade
+        humidity_percentage = (1.0f - ((float)(adc_raw_value - ADC_MINREADING) / (ADC_MAXREADING - ADC_MINREADING))) * 100.0f;
+    }
+}
+
+void control_relay() {
+    // Controla o relé com base na umidade, ligando o relé por um tempo, mas sem travar o programa
+    // depois que o relé desativar, trava o relé por um tempo definido, para o sensor conseguir estabilizar
+    if (!flag_rele) { 
+        if (time_us_32() - rele_time >= RELE_INTERVAL_US) {
+            flag_rele = true; // Destrava a possibilidade de ativar o relé
+            gpio_put(PIN_RELE, false); // Garante que o relé esteja desligado
+        }
+        else {
+            return;
+        }
+    }
+    if (humidity_percentage < HUMIDITY_THRESHOLD) {
+        // Se a umidade estiver abaixo do limite, ativa o relé
+        gpio_put(PIN_RELE, true);
+        pump_timer = time_us_32();
+    }
+    if (time_us_32() - pump_timer >= PUMP_INTERVAL_US) {
+        gpio_put(PIN_RELE, false);
+        flag_rele = false; // Desativa o relé
+        rele_time = time_us_32(); // Atualiza o tempo do relé
+        }
+}
 
 // --- Funções Wrapper para Simplificar o Uso do OLED ---
 
@@ -75,9 +93,9 @@ bool oled_is_initialized = false;
  * Configura o buffer e inicializa a comunicação I2C com o display.
  * Deve ser chamada uma vez antes de usar as outras funções oled_*.
  */
-bool oled_init(i2c_inst_t* i2c_instance = DEFAULT_I2C_INSTANCE,
-               uint8_t sda_pin = DEFAULT_I2C_SDA_PIN,
-               uint8_t scl_pin = DEFAULT_I2C_SCL_PIN,
+bool oled_init(i2c_inst_t* i2c_instance = I2C_INSTANCE,
+               uint8_t sda_pin = I2C_SDA_PIN,
+               uint8_t scl_pin = I2C_SCL_PIN,
                uint16_t clk_speed_khz = DEFAULT_I2C_CLOCK_SPEED,
                uint8_t i2c_address = DEFAULT_OLED_I2C_ADDRESS) {
     if (oled_is_initialized) {
@@ -166,6 +184,8 @@ void oled_draw_pixel(int16_t x, int16_t y, uint8_t color, bool update_now = true
     }
 }
 
+char adc_text_buffer[32];
+char humidity_text_buffer[32];
 
 // --- Função Principal ---
 int main() {
@@ -177,18 +197,31 @@ int main() {
     adc_gpio_init(PIN_SENSOR); // Inicializa o pino do sensor como ADC
     adc_select_input(0); // Seleciona o canal ADC 0 (pino 26)
 
-    if (!add_repeating_timer_us(-10000, repeating_timer_callback, NULL, &timer)) {
+    if (!add_repeating_timer_us(-500000, repeating_timer_callback, NULL, &timer)) {
         printf("Falha ao adicionar o timer!\n");
         return 1;
     }
 
-    while (true) {
-        // Seu código principal pode ir aqui
-        convert_adc(); // Converte o valor lido do ADC para porcentagem de umidade
-        control_relay(); // Controla o relé com base na umidade
-        printf("ADC Raw: %d, Humidity: %.2f%%\n", adc_raw_value, humidity_percentage * 100.0f); // Debug output
-        sleep_ms(100); // Aguarda 1 segundo antes da próxima leitura
+    // Inicializa o OLED
+    if (!oled_init(I2C_INSTANCE, I2C_SDA_PIN, I2C_SCL_PIN, DEFAULT_I2C_CLOCK_SPEED, DEFAULT_OLED_I2C_ADDRESS)) {
+        printf("Erro ao inicializar o OLED.\n");
+        return 1;
     }
+
+    oled_clear(); // Limpa o buffer do OLED
+
+    while (true) {
+        convert_adc(); // Converte o valor do ADC para porcentagem de umidade
+        control_relay(); // Controla o relé com base na umidade
+        snprintf(adc_text_buffer, sizeof(adc_text_buffer), "ADC: %d", adc_raw_value);
+        snprintf(humidity_text_buffer, sizeof(humidity_text_buffer), "Umidade: %.2f%%", humidity_percentage);
+        // Atualiza o OLED com os valores lidos
+        oled_clear(false); // Limpa o buffer do OLED
+        oled_write_text(5, 12, adc_text_buffer, pFontDefault, false);      // Escreve valor do ADC, não atualiza
+        oled_write_text(5, 22, humidity_text_buffer, pFontDefault, false); // Escreve valor do contador, não atualiza
+        oled_display(); // Atualiza o OLED com os dados do buffer
+        sleep_ms(250);
+    }   
 
     return 0;
 }
