@@ -13,11 +13,13 @@
 #define PIN_SENSOR 26
 
 #define ADC_MAXREADING 3500 // -> Solo seco (valor máximo do ADC)
-#define ADC_MINREADING 900 // -> sensor imerso em água (valor mínimo do ADC)
+#define ADC_MINREADING 600 // -> sensor imerso em água (valor mínimo do ADC)
 
-#define HUMIDITY_THRESHOLD 0.4f // Limite de umidade para ativar o relé (40%)
-#define PUMP_INTERVAL_US 1500000 // Intervalo de tempo para o relé (1,5 segundo)
+#define HUMIDITY_THRESHOLD 40.0f // Limite de umidade para ativar o relé (40%)
+#define PUMP_INTERVAL_US 2000000 // Intervalo de tempo para o relé (1,5 segundo)
 #define RELE_INTERVAL_US 120000000 // Intervalo de tempo para o relé 
+// 1,5 segundos em us = 1.5 * 1000000 = 1500000 us
+// 2 minutos em us = 2 * 60 * 1000000 = 120000000 us
 
 struct repeating_timer timer;
 
@@ -25,7 +27,7 @@ uint16_t adc_raw_value = 0; // Variável para armazenar o valor lido do ADC
 float humidity_percentage = 0.0f; // Variável para armazenar a umidade em porcentagem
 uint32_t pump_timer = 0; // Timer para controlar o relé
 uint32_t rele_time = 0; // Tempo do último acionamento do relé
-bool flag_rele = false; // Flag para controlar o estado do relé
+bool flag_rele = true; // Flag para controlar o estado do relé
 // --- Configurações Globais para o OLED e Wrappers ---
 const int16_t OLED_WIDTH = 128;
 const int16_t OLED_HEIGHT = 32; // Mude para 32 se for um display 128x32
@@ -53,12 +55,12 @@ bool repeating_timer_callback(struct repeating_timer *t) {
 void convert_adc(){
     // Converte o valor lido do ADC para porcentagem de umidade (0 a 100%)
     if (adc_raw_value >= ADC_MAXREADING) {
-        humidity_percentage = 0.0f; // Se o valor for máximo, a umidade é 0%
+        humidity_percentage = 0.0f; // Garante que o valor não seja maior que o máximo
     } else if (adc_raw_value <= ADC_MINREADING) {
-        humidity_percentage = 100.0f; // Se o valor for mínimo, a umidade é 100%
+        humidity_percentage = 100.0f; // Garante que o valor não seja menor que o mínimo
     } else {
-        // Interpolação linear para converter o valor do ADC em porcentagem de umidade
-        humidity_percentage = (1.0f - ((float)(adc_raw_value - ADC_MINREADING) / (ADC_MAXREADING - ADC_MINREADING))) * 100.0f;
+        // Converte o valor do ADC para porcentagem de umidade
+        humidity_percentage = ((float)(ADC_MAXREADING - adc_raw_value) / (ADC_MAXREADING - ADC_MINREADING)) * 100.0f;
     }
 }
 
