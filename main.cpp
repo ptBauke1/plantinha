@@ -8,6 +8,7 @@
 #include "include/ssd1306/SSD1306_OLED.hpp" // Ajuste o caminho conforme sua estrutura
 
 #include <stdio.h>
+#include <math.h>
 
 #define PIN_RELE 2
 #define PIN_SENSOR 26
@@ -15,10 +16,13 @@
 #define ADC_MAXREADING 3500 // -> Solo seco (valor máximo do ADC)
 #define ADC_MINREADING 600 // -> sensor imerso em água (valor mínimo do ADC)
 
+#define MAX_CONCENTRATION 40.0f // Concentração máxima de umidade (100%)
+#define MIN_CONCENTRATION 8.0f // Concentração mínima de umidade (0%)
+
 #define HUMIDITY_THRESHOLD 40.0f // Limite de umidade para ativar o relé (40%)
-#define PUMP_INTERVAL_US 2000000 // Intervalo de tempo para o relé (1,5 segundo)
+#define PUMP_INTERVAL_US 1000000 // Intervalo de tempo para o relé (1,0 segundo)
 #define RELE_INTERVAL_US 120000000 // Intervalo de tempo para o relé 
-// 1,5 segundos em us = 1.5 * 1000000 = 1500000 us
+// 1,0 segundos em us = 1.0 * 1000000 = 1000000 us
 // 2 minutos em us = 2 * 60 * 1000000 = 120000000 us
 
 struct repeating_timer timer;
@@ -54,13 +58,27 @@ bool repeating_timer_callback(struct repeating_timer *t) {
 
 void convert_adc(){
     // Converte o valor lido do ADC para porcentagem de umidade (0 a 100%)
-    if (adc_raw_value >= ADC_MAXREADING) {
-        humidity_percentage = 0.0f; // Garante que o valor não seja maior que o máximo
-    } else if (adc_raw_value <= ADC_MINREADING) {
-        humidity_percentage = 100.0f; // Garante que o valor não seja menor que o mínimo
+    // if (adc_raw_value >= ADC_MAXREADING) {
+        // humidity_percentage = 0.0f; // Garante que o valor não seja maior que o máximo
+    // } else if (adc_raw_value <= ADC_MINREADING) {
+        // humidity_percentage = 100.0f; // Garante que o valor não seja menor que o mínimo
+    // } else {
+        //Converte o valor do ADC para porcentagem de umidade
+        // humidity_percentage = ((float)(ADC_MAXREADING - adc_raw_value) / (ADC_MAXREADING - ADC_MINREADING)) * 100.0f;
+    // }
+    // humidity_percentage  = (5365.1f/ adc_raw_value) ^ 2.2573f
+    if (adc_raw_value <= 700) {
+        humidity_percentage = 100.0f; // Evita divisão por zero
+    } else if (adc_raw_value >= 2500) {
+        humidity_percentage = 0.0f; // Evita valores negativos
     } else {
-        // Converte o valor do ADC para porcentagem de umidade
-        humidity_percentage = ((float)(ADC_MAXREADING - adc_raw_value) / (ADC_MAXREADING - ADC_MINREADING)) * 100.0f;
+        humidity_percentage = pow((5365.1f / adc_raw_value), 2.2573f);
+    }
+    humidity_percentage = (humidity_percentage - MIN_CONCENTRATION) / (MAX_CONCENTRATION - MIN_CONCENTRATION) * 100.0f;
+    if (humidity_percentage < 0.0f) {
+        humidity_percentage = 0.0f; // Garante que o valor não seja negativo
+    } else if (humidity_percentage > 100.0f) {
+        humidity_percentage = 100.0f; // Garante que o valor não ultrapasse 100%
     }
 }
 
